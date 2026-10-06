@@ -54,6 +54,7 @@ def available_modulations():
 
 
 class Transmitter:
+    #TODO: pointing error
     def __init__(self, wavelength):
         self.wavelength = wavelength #[m]
         self.power = None #[W]
