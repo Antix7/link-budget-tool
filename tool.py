@@ -1,0 +1,170 @@
+import scipy.constants
+from math import *
+import itur.models.itu676 as attenuation_model
+
+
+c = scipy.constants.speed_of_light
+k_b = scipy.constants.Boltzmann
+R_E = 6371000 #[m]
+AU = 149597870700 #[m]
+
+coding_schemes = { # name: [rate, gain]
+    "Convolutional code": [1/2, 5],
+    "Convolutional-RS": [1/2, 7],
+    "Turbo-Code": [1/6, 10],
+    "LDPC": [3/4, 10]
+}
+
+modulation_schemes = { # name: [required SNR, spectral efficiency] - BER=1e-9
+    "QPSK 1/4": [2.2, 0.49],
+    "QPSK 1/3": [2.1, 0.66],
+    "QPSK 2/5": [2.2, 0.79],
+    "QPSK 1/2": [2.5, 0.99],
+    "QPSK 3/5": [2.9, 1.19],
+    "QPSK 2/3": [3.4, 1.32],
+    "QPSK 3/4": [3.8, 1.49],
+    "QPSK 4/5": [4.2, 1.59],
+    "QPSK 5/6": [4.5, 1.65],
+    "QPSK 8/9": [5.2, 1.77],
+    "QPSK 9/10": [5.4, 1.79],
+    "8PSK 3/5": [4.5, 1.78],
+    "8PSK 2/3": [5.1, 1.98],
+    "8PSK 3/4": [5.9, 2.23],
+    "8PSK 5/6": [7.0, 2.48],
+    "8PSK 8/9": [8.0, 2.65],
+    "8PSK 9/10": [8.2, 2.68],
+    "16APSK 2/3": [6.3, 2.64],
+    "16APSK 3/4": [7.0, 2.97],
+    "16APSK 4/5": [7.5, 3.17],
+    "16APSK 5/6": [7.9, 3.3],
+    "16APSK 8/9": [8.9, 3.52],
+    "16APSK 9/10": [9.1, 3.57]
+}
+
+
+def available_codes():
+    print(coding_schemes.keys())
+    return coding_schemes.keys()
+
+def available_modulations():
+    print(modulation_schemes.keys())
+    return modulation_schemes.keys()
+
+
+class Transmitter:
+    def __init__(self, wavelength):
+        self.wavelength = wavelength #[m]
+        self.power = None #[W]
+        self.gain = None #[dB]
+        self.loss = None #[dB, positive]
+
+    def parabolic_antenna(self, diameter, efficiency):
+        self.gain = 20*log10(pi*diameter / self.wavelength) + 10*log10(efficiency)
+
+    def set_loss(self, absolute_loss):
+        self.loss = -10*log10(absolute_loss)
+
+    def EIRP(self):
+        return 10*log10(self.power) - self.loss + self.gain
+
+
+class Receiver:
+    def __init__(self):
+        self.G_over_T = None #[dBK]
+
+
+class SpaceLoss:
+    def __init__(self, wavelength):
+        self.wavelength = wavelength #[m]
+        self.distance = None #[m]
+        self.loss = None #[dB, positive]
+
+    def calculate_loss(self):
+        self.loss = 20*log10(4*pi*self.distance / self.wavelength)
+
+    def Earth_orbit(self, altitude, elevation_deg):
+        elevation = radians(elevation_deg)
+        self.distance = R_E * (sqrt(((R_E+altitude) / R_E)**2 - cos(elevation)**2) - sin(elevation))
+        self.calculate_loss()
+
+    def deep_space(self, sun_distance, elongation_angle_deg):
+        elongation = radians(elongation_angle_deg)
+        self.distance = sqrt(AU**2 + sun_distance**2 - 2*AU*sun_distance*cos(elongation))
+        self.calculate_loss()
+
+
+class Modulation:
+    def __init__(self):
+        self.required_SNR = None #[dB]
+        self.spectral_efficiency = None #[bits/s/Hz]
+        self.BER = None #[-]
+
+    def scheme(self, name):
+        self.required_SNR = modulation_schemes[name][0]
+        self.spectral_efficiency = modulation_schemes[name][1]
+        self.BER = 1.0e-9
+
+
+class Coding:
+    def __init__(self):
+        self.rate = None #[-]
+        self.gain = None #[dB]
+
+    def no_coding(self):
+        self.rate = 1
+        self.gain = 0
+
+    def scheme(self, name):
+        self.rate = coding_schemes[name][0]
+        self.gain = coding_schemes[name][1]
+
+
+class Analysis:
+    def __init__(self, frequency):
+        self.frequency = frequency
+        self.wavelength = c/frequency #[m]
+        self.transmitter = Transmitter(self.wavelength)
+        self.receiver = Receiver()
+        self.space_loss = SpaceLoss(self.wavelength)
+        self.atmospheric_loss = None #[dB]
+        self.modulation = Modulation()
+        self.coding = Coding()
+        self.data_rate = None #[bits/s]
+
+    def atmospheric_attenuation(self, elevation_deg):
+        self.atmospheric_loss = attenuation_model.gaseous_attenuation_slant_path(
+            f=self.frequency * 1.0e-9,
+            el=elevation_deg,
+            rho=7.5,  # Water vapor density in g/m^3
+            P=1013,  # Pressure in hPa
+            T=15,  # Temperature in Celsius
+            mode="exact"
+        ).value
+
+    def received_SNR(self):
+        SNR = (self.transmitter.EIRP() - self.space_loss.loss - self.atmospheric_loss + self.receiver.G_over_T +
+               self.coding.gain - 10 * log10(k_b * self.data_rate / self.coding.rate))
+        return SNR
+
+    def get_margin(self):
+        return self.received_SNR() - self.modulation.required_SNR
+
+    def get_bandwidth(self):
+        return self.data_rate / (self.coding.rate * self.modulation.spectral_efficiency)
+
+
+
+link = Analysis(frequency=2.5e9)
+link.data_rate = 250e6
+link.transmitter.power = 2
+link.transmitter.gain = 10.2
+link.transmitter.loss = 0.97
+link.receiver.G_over_T = 16.2
+link.space_loss.Earth_orbit(570e3, 10)
+link.atmospheric_attenuation(10)
+link.modulation.scheme("QPSK 3/4")
+link.coding.no_coding()
+print(link.received_SNR())
+print(link.get_margin())
+print(link.get_bandwidth())
+
