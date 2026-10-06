@@ -1,5 +1,7 @@
-import scipy.constants
+#TODO: instructions
+
 from math import *
+import scipy.constants
 import itur.models.itu676 as attenuation_model
 
 
@@ -152,6 +154,15 @@ class Analysis:
     def get_bandwidth(self):
         return self.data_rate / (self.coding.rate * self.modulation.spectral_efficiency)
 
+    def get_result(self):
+        margin = self.get_margin()
+        bandwidth = self.get_bandwidth()
+        print(f"Link margin: {margin:.2f} dB")
+        if bandwidth < 1e6:
+            print(f"Required bandwidth: {bandwidth * 1.0e-3:.2f} kHz")
+        else:
+            print(f"Required bandwidth: {bandwidth * 1.0e-6:.2f} MHz")
+
 
 
 link = Analysis(frequency=2.5e9)
@@ -164,7 +175,6 @@ link.space_loss.Earth_orbit(570e3, 10)
 link.atmospheric_attenuation(10)
 link.modulation.scheme("QPSK 3/4")
 link.coding.no_coding()
-print(link.received_SNR())
-print(link.get_margin())
-print(link.get_bandwidth())
+
+link.get_result()
 
