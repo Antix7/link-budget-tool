@@ -1,13 +1,9 @@
 from math import *
-import scipy.constants
+import astropy.units as u
+from astropy.constants import k_B, c, R_earth, au
 import itur.models.itu676 as atmospheric_attenuation_model
 import itur.models.itu618 as rain_attenuation_model
 
-
-c = scipy.constants.speed_of_light
-k_b = scipy.constants.Boltzmann
-R_E = 6371000 #[m]
-AU = 149597870700 #[m]
 
 coding_schemes = { # name: [rate, gain]
     "Convolutional code": [1/2, 5],
@@ -51,29 +47,34 @@ def available_modulations():
     print(modulation_schemes.keys())
     return modulation_schemes.keys()
 
+def to_dB(quantity):
+    if hasattr(quantity.unit, 'physical_unit'): # check if it is already in dB
+        return quantity
+    return quantity.to(u.dB(quantity.si.unit))
 
-class Transmitter:
+
+class Spacecraft:
     #TODO: pointing error
     def __init__(self, wavelength):
-        self.wavelength = wavelength #[m]
-        self.power = None #[W]
-        self.gain = None #[dB]
-        self.loss = None #[dB, positive]
+        self.wavelength = wavelength
+        self.power = 0*u.Watt
+        self.gain = 0*u.dB
+        self.loss = 0*u.dB # positive
 
     def parabolic_antenna(self, diameter, efficiency):
-        self.gain = 20*log10(pi*diameter / self.wavelength) + 10*log10(efficiency)
+        self.gain = 2*to_dB(pi*diameter / self.wavelength) + to_dB(efficiency)
 
     def set_loss(self, absolute_loss):
-        self.loss = -10*log10(absolute_loss)
+        self.loss = -to_dB(absolute_loss * u.dimensionless_unscaled)
 
     def EIRP(self):
-        return 10*log10(self.power) - self.loss + self.gain
+        return to_dB(self.power) - self.loss + self.gain
 
 
 class Receiver:
     def __init__(self):
-        self.G_over_T = None #[dBK]
-        self.latitude = None #[deg]
+        self.G_over_T = 0*u.dB(1/u.Kelvin)
+        self.latitude = 0*u.deg #[deg]
         self.longitude = None #[deg]
 
 
@@ -125,9 +126,9 @@ class Coding:
 
 class Analysis:
     def __init__(self, frequency):
-        self.frequency = frequency
-        self.wavelength = c/frequency #[m]
-        self.transmitter = Transmitter(self.wavelength)
+        self.frequency = frequency.si
+        self.wavelength = c/self.frequency
+        self.spacecraft = Spacecraft(self.wavelength)
         self.receiver = Receiver()
         self.space_loss = SpaceLoss(self.wavelength)
         self.atmospheric_loss = 0 #[dB]
@@ -156,7 +157,7 @@ class Analysis:
         ).value
 
     def received_SNR(self):
-        SNR = (self.transmitter.EIRP() - self.space_loss.loss - self.atmospheric_loss - self.rain_loss
+        SNR = (self.spacecraft.EIRP() - self.space_loss.loss - self.atmospheric_loss - self.rain_loss
                + self.receiver.G_over_T + self.coding.gain - 10 * log10(k_b * self.data_rate / self.coding.rate))
         return SNR
 
@@ -180,9 +181,9 @@ class Analysis:
 link = Analysis(frequency=2.5e9)
 link.data_rate = 250e6
 
-link.transmitter.power = 2
-link.transmitter.gain = 10.2
-link.transmitter.loss = 0.97
+link.spacecraft.power = 2
+link.spacecraft.gain = 10.2
+link.spacecraft.loss = 0.97
 
 link.receiver.G_over_T = 16.2
 link.receiver.latitude = 52.07
