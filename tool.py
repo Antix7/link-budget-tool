@@ -57,21 +57,26 @@ def to_dB(quantity):
 
 
 class Spacecraft:
-    #TODO: pointing error
-    def __init__(self, wavelength):
-        self.wavelength = wavelength
-        self.power = 0*u.Watt
-        self.gain = 0*u.dB
-        self.loss = 0*u.dB #positive
+    def __init__(self, frequency):
+        self.frequency = frequency
+        self.antenna_power = 0*u.Watt
+        self.antenna_gain = 0*u.dB
+        self.antenna_loss = 0*u.dB #positive
+        self.half_power_angle = 0*u.deg
+        self.pointing_loss_value = u.dB #positive
 
     def parabolic_antenna(self, diameter, efficiency):
-        self.gain = 2*to_dB(pi*diameter / self.wavelength) + to_dB(efficiency)
+        self.antenna_gain = 2 * to_dB(pi * diameter * self.frequency / c) + to_dB(efficiency)
+        self.half_power_angle = (u.GHz*u.m*u.deg*21/(self.frequency*diameter)).to(u.deg) # empirical formula
 
-    def absolute_loss(self, absolute_loss):
-        self.loss = -to_dB(absolute_loss)
+    def absolute_antenna_loss(self, absolute_loss):
+        self.antenna_loss = -to_dB(absolute_loss)
+
+    def pointing_loss(self, pointing_offset_angle):
+        self.pointing_loss_value = 12*u.dB*((pointing_offset_angle/self.half_power_angle)**2)
 
     def EIRP(self):
-        return to_dB(self.power) - self.loss + self.gain
+        return to_dB(self.antenna_power) - self.antenna_loss + self.antenna_gain - self.pointing_loss_value
 
 
 class GroundStation:
@@ -129,7 +134,7 @@ class Analysis:
     def __init__(self, frequency):
         self.frequency = frequency.si
         self.wavelength = c/self.frequency
-        self.spacecraft = Spacecraft(self.wavelength)
+        self.spacecraft = Spacecraft(self.frequency)
         self.ground_station = GroundStation()
         self.space_loss = SpaceLoss(self.wavelength)
         self.atmospheric_loss = 0*u.dB
@@ -180,9 +185,10 @@ class Analysis:
 link = Analysis(frequency=2.5*u.GHz)
 link.data_rate = 250*u.MHz
 
-link.spacecraft.power = 2*u.W
-link.spacecraft.gain = 10.2*u.dB
-link.spacecraft.loss = 0.97*u.dB
+link.spacecraft.parabolic_antenna(0.166*u.m, 0.55)
+link.spacecraft.antenna_power = 2 * u.W
+link.spacecraft.antenna_loss = 0.97 * u.dB
+link.spacecraft.pointing_loss(0.25*u.deg)
 
 link.ground_station.G_over_T = 16.2*u.dB(1/u.Kelvin)
 link.ground_station.latitude = 52.07*u.deg
