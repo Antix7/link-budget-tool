@@ -152,7 +152,6 @@ class Analysis:
             lon = self.receiver.longitude,
             f = self.frequency * 1.0e-9, # frequency in GHz
             el = elevation_deg,
-            #hs = self.receiver.altitude/1000, # altitude in km
             p = 100 - availability_percent # unavailability in %
         ).value
 
@@ -192,8 +191,6 @@ link.receiver.longitude = 4.30
 link.space_loss.Earth_orbit(570e3, 10)
 link.atmospheric_attenuation(10)
 link.rain_attenuation(99.99, 10)
-
-print(link.rain_loss)
 
 link.modulation.scheme("QPSK 3/4")
 link.coding.no_coding()
