@@ -1,4 +1,5 @@
 from math import *
+import numpy as np
 import astropy.units as u
 from astropy.constants import k_B, c, R_earth, au
 import itur.models.itu676 as atmospheric_attenuation_model
@@ -48,6 +49,8 @@ def available_modulations():
     return modulation_schemes.keys()
 
 def to_dB(quantity):
+    if type(quantity) in (float, int): # check if it is dimensionless
+        return 10*log10(quantity)*u.dB
     if hasattr(quantity.unit, 'physical_unit'): # check if it is already in dB
         return quantity
     return quantity.to(u.dB(quantity.si.unit))
@@ -59,69 +62,67 @@ class Spacecraft:
         self.wavelength = wavelength
         self.power = 0*u.Watt
         self.gain = 0*u.dB
-        self.loss = 0*u.dB # positive
+        self.loss = 0*u.dB #positive
 
     def parabolic_antenna(self, diameter, efficiency):
         self.gain = 2*to_dB(pi*diameter / self.wavelength) + to_dB(efficiency)
 
-    def set_loss(self, absolute_loss):
-        self.loss = -to_dB(absolute_loss * u.dimensionless_unscaled)
+    def absolute_loss(self, absolute_loss):
+        self.loss = -to_dB(absolute_loss)
 
     def EIRP(self):
         return to_dB(self.power) - self.loss + self.gain
 
 
-class Receiver:
+class GroundStation:
     def __init__(self):
         self.G_over_T = 0*u.dB(1/u.Kelvin)
-        self.latitude = 0*u.deg #[deg]
-        self.longitude = None #[deg]
+        self.latitude = 0*u.deg
+        self.longitude = 0*u.deg
 
 
 class SpaceLoss:
     def __init__(self, wavelength):
-        self.wavelength = wavelength #[m]
-        self.distance = None #[m]
-        self.loss = None #[dB, positive]
+        self.wavelength = wavelength
+        self.distance = 0*u.meter
+        self.loss = 0*u.dB #positive
 
     def calculate_loss(self):
-        self.loss = 20*log10(4*pi*self.distance / self.wavelength)
+        self.loss = 2*to_dB(4*pi*self.distance / self.wavelength)
 
-    def Earth_orbit(self, altitude, elevation_deg):
-        elevation = radians(elevation_deg)
-        self.distance = R_E * (sqrt(((R_E+altitude) / R_E)**2 - cos(elevation)**2) - sin(elevation))
+    def Earth_orbit(self, altitude, elevation_angle):
+        self.distance = R_earth * (sqrt(((R_earth+altitude) / R_earth)**2 - np.cos(elevation_angle)**2) - np.sin(elevation_angle))
         self.calculate_loss()
 
-    def deep_space(self, sun_distance, elongation_angle_deg):
-        elongation = radians(elongation_angle_deg)
-        self.distance = sqrt(AU**2 + sun_distance**2 - 2*AU*sun_distance*cos(elongation))
+    def deep_space(self, sun_distance, elongation_angle):
+        self.distance = np.sqrt(au**2 + sun_distance**2 - 2*au*sun_distance*np.cos(elongation_angle))
         self.calculate_loss()
 
 
 class Modulation:
     def __init__(self):
-        self.required_SNR = None #[dB]
-        self.spectral_efficiency = None #[bits/s/Hz]
-        self.BER = None #[-]
+        self.required_SNR = 0*u.dB
+        self.spectral_efficiency = 0 #[bits/s/Hz = Hz/Hz = dimensionless]
+        self.BER = 0 #[dimensionless]
 
     def scheme(self, name):
-        self.required_SNR = modulation_schemes[name][0]
+        self.required_SNR = modulation_schemes[name][0]*u.dB
         self.spectral_efficiency = modulation_schemes[name][1]
         self.BER = 1.0e-9
 
 
 class Coding:
     def __init__(self):
-        self.rate = None #[-]
-        self.gain = None #[dB]
+        self.rate = 0 #[dimensionless]
+        self.gain = 0*u.dB
 
     def no_coding(self):
         self.rate = 1
-        self.gain = 0
+        self.gain = 0*u.dB
 
     def scheme(self, name):
         self.rate = coding_schemes[name][0]
-        self.gain = coding_schemes[name][1]
+        self.gain = coding_schemes[name][1]*u.dB
 
 
 class Analysis:
@@ -129,36 +130,36 @@ class Analysis:
         self.frequency = frequency.si
         self.wavelength = c/self.frequency
         self.spacecraft = Spacecraft(self.wavelength)
-        self.receiver = Receiver()
+        self.ground_station = GroundStation()
         self.space_loss = SpaceLoss(self.wavelength)
-        self.atmospheric_loss = 0 #[dB]
-        self.rain_loss = 0 #[dB]
+        self.atmospheric_loss = 0*u.dB
+        self.rain_loss = 0*u.dB
         self.modulation = Modulation()
         self.coding = Coding()
-        self.data_rate = None #[bits/s]
+        self.data_rate = 0*u.Hz #[bits/s = Hz]
 
-    def atmospheric_attenuation(self, elevation_deg):
+    def atmospheric_attenuation(self, elevation_angle):
         self.atmospheric_loss = atmospheric_attenuation_model.gaseous_attenuation_slant_path(
-            f = self.frequency * 1.0e-9,
-            el = elevation_deg,
+            f = self.frequency.to(u.GHz).value,
+            el = elevation_angle.to(u.deg).value,
             rho = 7.5,  # Water vapor density in g/m^3
             P = 1013,  # Pressure in hPa
             T = 15,  # Temperature in Celsius
             mode = "exact"
-        ).value
+        )
 
-    def rain_attenuation(self, availability_percent, elevation_deg):
+    def rain_attenuation(self, availability_percent, elevation_angle):
         self.rain_loss = rain_attenuation_model.rain_attenuation(
-            lat = self.receiver.latitude,
-            lon = self.receiver.longitude,
-            f = self.frequency * 1.0e-9, # frequency in GHz
-            el = elevation_deg,
+            lat = self.ground_station.latitude.to(u.deg).value,
+            lon = self.ground_station.longitude.to(u.deg).value,
+            f = self.frequency.to(u.GHz).value, # frequency in GHz
+            el = elevation_angle.to(u.deg).value,
             p = 100 - availability_percent # unavailability in %
-        ).value
+        )
 
     def received_SNR(self):
         SNR = (self.spacecraft.EIRP() - self.space_loss.loss - self.atmospheric_loss - self.rain_loss
-               + self.receiver.G_over_T + self.coding.gain - 10 * log10(k_b * self.data_rate / self.coding.rate))
+               + self.ground_station.G_over_T + self.coding.gain - to_dB(k_B * self.data_rate / self.coding.rate))
         return SNR
 
     def get_margin(self):
@@ -170,28 +171,26 @@ class Analysis:
     def get_result(self):
         margin = self.get_margin()
         bandwidth = self.get_bandwidth()
-        print(f"Link margin: {margin:.2f} dB")
-        if bandwidth < 1e6:
-            print(f"Required bandwidth: {bandwidth * 1.0e-3:.2f} kHz")
-        else:
-            print(f"Required bandwidth: {bandwidth * 1.0e-6:.2f} MHz")
+        print(f"Link margin: {margin:.3f}")
+        print(f"Required bandwidth: {bandwidth:.2f}")
 
 
 
-link = Analysis(frequency=2.5e9)
-link.data_rate = 250e6
 
-link.spacecraft.power = 2
-link.spacecraft.gain = 10.2
-link.spacecraft.loss = 0.97
+link = Analysis(frequency=2.5*u.GHz)
+link.data_rate = 250*u.MHz
 
-link.receiver.G_over_T = 16.2
-link.receiver.latitude = 52.07
-link.receiver.longitude = 4.30
+link.spacecraft.power = 2*u.W
+link.spacecraft.gain = 10.2*u.dB
+link.spacecraft.loss = 0.97*u.dB
 
-link.space_loss.Earth_orbit(570e3, 10)
-link.atmospheric_attenuation(10)
-link.rain_attenuation(99.99, 10)
+link.ground_station.G_over_T = 16.2*u.dB(1/u.Kelvin)
+link.ground_station.latitude = 52.07*u.deg
+link.ground_station.longitude = 4.30*u.deg
+
+link.space_loss.Earth_orbit(570*u.km, 10*u.deg)
+link.atmospheric_attenuation(10*u.deg)
+link.rain_attenuation(99.9, 10*u.deg)
 
 link.modulation.scheme("QPSK 3/4")
 link.coding.no_coding()
