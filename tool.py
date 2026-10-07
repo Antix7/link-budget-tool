@@ -1,8 +1,7 @@
-#TODO: instructions
-
 from math import *
 import scipy.constants
-import itur.models.itu676 as attenuation_model
+import itur.models.itu676 as atmospheric_attenuation_model
+import itur.models.itu618 as rain_attenuation_model
 
 
 c = scipy.constants.speed_of_light
@@ -74,6 +73,8 @@ class Transmitter:
 class Receiver:
     def __init__(self):
         self.G_over_T = None #[dBK]
+        self.latitude = None #[deg]
+        self.longitude = None #[deg]
 
 
 class SpaceLoss:
@@ -129,24 +130,35 @@ class Analysis:
         self.transmitter = Transmitter(self.wavelength)
         self.receiver = Receiver()
         self.space_loss = SpaceLoss(self.wavelength)
-        self.atmospheric_loss = None #[dB]
+        self.atmospheric_loss = 0 #[dB]
+        self.rain_loss = 0 #[dB]
         self.modulation = Modulation()
         self.coding = Coding()
         self.data_rate = None #[bits/s]
 
     def atmospheric_attenuation(self, elevation_deg):
-        self.atmospheric_loss = attenuation_model.gaseous_attenuation_slant_path(
-            f=self.frequency * 1.0e-9,
-            el=elevation_deg,
-            rho=7.5,  # Water vapor density in g/m^3
-            P=1013,  # Pressure in hPa
-            T=15,  # Temperature in Celsius
-            mode="exact"
+        self.atmospheric_loss = atmospheric_attenuation_model.gaseous_attenuation_slant_path(
+            f = self.frequency * 1.0e-9,
+            el = elevation_deg,
+            rho = 7.5,  # Water vapor density in g/m^3
+            P = 1013,  # Pressure in hPa
+            T = 15,  # Temperature in Celsius
+            mode = "exact"
+        ).value
+
+    def rain_attenuation(self, availability_percent, elevation_deg):
+        self.rain_loss = rain_attenuation_model.rain_attenuation(
+            lat = self.receiver.latitude,
+            lon = self.receiver.longitude,
+            f = self.frequency * 1.0e-9, # frequency in GHz
+            el = elevation_deg,
+            #hs = self.receiver.altitude/1000, # altitude in km
+            p = 100 - availability_percent # unavailability in %
         ).value
 
     def received_SNR(self):
-        SNR = (self.transmitter.EIRP() - self.space_loss.loss - self.atmospheric_loss + self.receiver.G_over_T +
-               self.coding.gain - 10 * log10(k_b * self.data_rate / self.coding.rate))
+        SNR = (self.transmitter.EIRP() - self.space_loss.loss - self.atmospheric_loss - self.rain_loss
+               + self.receiver.G_over_T + self.coding.gain - 10 * log10(k_b * self.data_rate / self.coding.rate))
         return SNR
 
     def get_margin(self):
@@ -168,12 +180,21 @@ class Analysis:
 
 link = Analysis(frequency=2.5e9)
 link.data_rate = 250e6
+
 link.transmitter.power = 2
 link.transmitter.gain = 10.2
 link.transmitter.loss = 0.97
+
 link.receiver.G_over_T = 16.2
+link.receiver.latitude = 52.07
+link.receiver.longitude = 4.30
+
 link.space_loss.Earth_orbit(570e3, 10)
 link.atmospheric_attenuation(10)
+link.rain_attenuation(99.99, 10)
+
+print(link.rain_loss)
+
 link.modulation.scheme("QPSK 3/4")
 link.coding.no_coding()
 
