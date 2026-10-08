@@ -55,54 +55,62 @@ def to_dB(quantity):
         return quantity
     return quantity.to(u.dB(quantity.si.unit))
 
+def parabolic_antenna(frequency, diameter, efficiency):
+    gain = 2 * to_dB(pi * diameter * frequency / c) + to_dB(efficiency)
+    half_power_angle = (u.GHz * u.m * u.deg * 21 / (frequency * diameter)).to(u.deg)  # empirical formula
+    return gain, half_power_angle
 
 
 class Spacecraft:
-    def __init__(self, frequency):
-        self.frequency = frequency
-        self.antenna_power = 0*u.Watt
-        self.antenna_gain = 0*u.dB
+    def __init__(self, downlink_frequency, uplink_frequency):
+        self.downlink_frequency = downlink_frequency
+        self.uplink_frequency = uplink_frequency
+        self.transmitter_power = 0 * u.Watt
+        self.downlink_antenna_gain = 0 * u.dB
         self.antenna_loss = 0*u.dB #positive
         self.half_power_angle = 0*u.deg
-        self.pointing_loss_value = u.dB #positive
+        self.pointing_loss_value = 0*u.dB #positive
+        self.EIRP = 0*u.dB(u.Watt)
+        self.G_over_T = 0*u.dB(1/u.Kelvin)
 
     def parabolic_antenna(self, diameter, efficiency):
-        self.antenna_gain = 2 * to_dB(pi * diameter * self.frequency / c) + to_dB(efficiency)
-        self.half_power_angle = (u.GHz*u.m*u.deg*21/(self.frequency*diameter)).to(u.deg) # empirical formula
+        self.downlink_antenna_gain, self.half_power_angle = parabolic_antenna(self.downlink_frequency, diameter, efficiency)
 
     def absolute_antenna_loss(self, absolute_loss):
         self.antenna_loss = -to_dB(absolute_loss)
 
     def pointing_loss(self, pointing_offset_angle):
-        self.pointing_loss_value = 12*u.dB*((pointing_offset_angle/self.half_power_angle)**2)
+        self.pointing_loss_value = 12*u.dB*((pointing_offset_angle.to(u.deg)/self.half_power_angle.to(u.deg))**2) # empirical formula
 
-    def EIRP(self):
-        return to_dB(self.antenna_power) - self.antenna_loss + self.antenna_gain - self.pointing_loss_value
+    def get_EIRP(self):
+        self.EIRP = to_dB(self.transmitter_power) - self.antenna_loss + self.downlink_antenna_gain - self.pointing_loss_value
+        return self.EIRP
 
 
 class GroundStation:
     def __init__(self):
         self.G_over_T = 0*u.dB(1/u.Kelvin)
+        self.EIRP = 0*u.dB(u.Watt)
         self.latitude = 0*u.deg
         self.longitude = 0*u.deg
 
 
 class SpaceLoss:
-    def __init__(self, wavelength):
-        self.wavelength = wavelength
+    def __init__(self, minimum_elevation_angle):
+        self.minimum_elevation_angle = minimum_elevation_angle
         self.distance = 0*u.meter
         self.loss = 0*u.dB #positive
 
-    def calculate_loss(self):
-        self.loss = 2*to_dB(4*pi*self.distance / self.wavelength)
+    def get_loss(self, frequency):
+        wavelength = c / frequency
+        self.loss = 2*to_dB(4*pi*self.distance / wavelength)
+        return self.loss
 
-    def Earth_orbit(self, altitude, elevation_angle):
-        self.distance = R_earth * (sqrt(((R_earth+altitude) / R_earth)**2 - np.cos(elevation_angle)**2) - np.sin(elevation_angle))
-        self.calculate_loss()
+    def Earth_orbit(self, altitude):
+        self.distance = R_earth * (sqrt(((R_earth+altitude) / R_earth)**2 - np.cos(self.minimum_elevation_angle)**2) - np.sin(self.minimum_elevation_angle))
 
     def deep_space(self, sun_distance, elongation_angle):
         self.distance = np.sqrt(au**2 + sun_distance**2 - 2*au*sun_distance*np.cos(elongation_angle))
-        self.calculate_loss()
 
 
 class Modulation:
@@ -131,76 +139,99 @@ class Coding:
         self.gain = coding_schemes[name][1]*u.dB
 
 
-class Analysis:
-    def __init__(self, frequency):
-        self.frequency = frequency.si
-        self.wavelength = c/self.frequency
-        self.spacecraft = Spacecraft(self.frequency)
+class LinkAnalysis:
+    def __init__(self, downlink_frequency, uplink_frequency, downlink_data_rate, uplink_data_rate, minimum_elevation_angle):
+        self.downlink_frequency = downlink_frequency.si
+        self.uplink_frequency = uplink_frequency.si
+        self.minimum_elevation_angle = minimum_elevation_angle.to(u.deg)
+        self.spacecraft = Spacecraft(self.downlink_frequency, self.uplink_frequency)
         self.ground_station = GroundStation()
-        self.space_loss = SpaceLoss(self.wavelength)
-        self.atmospheric_loss = 0*u.dB
-        self.rain_loss = 0*u.dB
+        self.space_loss = SpaceLoss(self.minimum_elevation_angle)
         self.modulation = Modulation()
         self.coding = Coding()
-        self.data_rate = 0*u.Hz #[bits/s = Hz]
+        self.downlink_data_rate = downlink_data_rate #[bits/s = Hz]
+        self.uplink_data_rate = uplink_data_rate
+        self.rain_availability_percent = 0
 
-    def atmospheric_attenuation(self, elevation_angle):
-        self.atmospheric_loss = atmospheric_attenuation_model.gaseous_attenuation_slant_path(
-            f = self.frequency.to(u.GHz).value,
-            el = elevation_angle.to(u.deg).value,
+    def atmospheric_attenuation(self, frequency):
+        return atmospheric_attenuation_model.gaseous_attenuation_slant_path(
+            f = frequency.to(u.GHz).value,
+            el = self.minimum_elevation_angle.to(u.deg).value,
             rho = 7.5,  # Water vapor density in g/m^3
             P = 1013,  # Pressure in hPa
             T = 15,  # Temperature in Celsius
             mode = "exact"
         )
 
-    def rain_attenuation(self, availability_percent, elevation_angle):
-        self.rain_loss = rain_attenuation_model.rain_attenuation(
+    def rain_attenuation(self, frequency):
+        return rain_attenuation_model.rain_attenuation(
             lat = self.ground_station.latitude.to(u.deg).value,
             lon = self.ground_station.longitude.to(u.deg).value,
-            f = self.frequency.to(u.GHz).value, # frequency in GHz
-            el = elevation_angle.to(u.deg).value,
-            p = 100 - availability_percent # unavailability in %
+            f = frequency.to(u.GHz).value, # frequency in GHz
+            el = self.minimum_elevation_angle.to(u.deg).value,
+            p = 100 - self.rain_availability_percent # unavailability in %
         )
 
-    def received_SNR(self):
-        SNR = (self.spacecraft.EIRP() - self.space_loss.loss - self.atmospheric_loss - self.rain_loss
-               + self.ground_station.G_over_T + self.coding.gain - to_dB(k_B * self.data_rate / self.coding.rate))
+    def downlink_SNR(self):
+        SNR = (self.spacecraft.get_EIRP() - self.space_loss.get_loss(self.downlink_frequency)
+               - self.atmospheric_attenuation(self.downlink_frequency) - self.rain_attenuation(self.downlink_frequency)
+               + self.ground_station.G_over_T + self.coding.gain - to_dB(k_B * self.downlink_data_rate / self.coding.rate))
         return SNR
 
-    def get_margin(self):
-        return self.received_SNR() - self.modulation.required_SNR
+    def uplink_SNR(self):
+        SNR = (self.ground_station.EIRP - self.space_loss.get_loss(self.uplink_frequency)
+               - self.atmospheric_attenuation(self.uplink_frequency) - self.rain_attenuation(self.uplink_frequency)
+               + self.spacecraft.G_over_T + self.coding.gain - to_dB(k_B * self.uplink_data_rate / self.coding.rate))
+        return SNR
 
-    def get_bandwidth(self):
-        return self.data_rate / (self.coding.rate * self.modulation.spectral_efficiency)
+    def get_margin(self, SNR):
+        return SNR - self.modulation.required_SNR
 
-    def get_result(self):
-        margin = self.get_margin()
-        bandwidth = self.get_bandwidth()
+    def get_bandwidth(self, data_rate):
+        return data_rate / (self.coding.rate * self.modulation.spectral_efficiency)
+
+    def downlink_analysis(self):
+        margin = self.get_margin(self.downlink_SNR())
+        bandwidth = self.get_bandwidth(self.downlink_data_rate)
+        print("Downlink analysis results:")
+        print(f"Link margin: {margin:.3f}")
+        print(f"Required bandwidth: {bandwidth:.2f}")
+
+    def uplink_analysis(self):
+        margin = self.get_margin(self.uplink_SNR())
+        bandwidth = self.get_bandwidth(self.uplink_data_rate)
+        print("Uplink analysis results:")
         print(f"Link margin: {margin:.3f}")
         print(f"Required bandwidth: {bandwidth:.2f}")
 
 
 
 
-link = Analysis(frequency=2.5*u.GHz)
-link.data_rate = 250*u.MHz
+link = LinkAnalysis(
+    downlink_frequency=2.5 * u.GHz,
+    uplink_frequency=2 * u.GHz,
+    downlink_data_rate = 250*u.MHz,
+    uplink_data_rate = 250*u.MHz,
+    minimum_elevation_angle= 10*u.deg
+)
 
 link.spacecraft.parabolic_antenna(0.166*u.m, 0.55)
-link.spacecraft.antenna_power = 2 * u.W
+link.spacecraft.transmitter_power = 2 * u.W
 link.spacecraft.antenna_loss = 0.97 * u.dB
 link.spacecraft.pointing_loss(0.25*u.deg)
+link.spacecraft.G_over_T = -10 * u.dB(1/u.Kelvin)
 
 link.ground_station.G_over_T = 16.2*u.dB(1/u.Kelvin)
 link.ground_station.latitude = 52.07*u.deg
 link.ground_station.longitude = 4.30*u.deg
+link.ground_station.EIRP = 50*u.dB(u.W)
 
-link.space_loss.Earth_orbit(570*u.km, 10*u.deg)
-link.atmospheric_attenuation(10*u.deg)
-link.rain_attenuation(99.9, 10*u.deg)
+link.space_loss.Earth_orbit(570*u.km)
+link.rain_availability_percent = 99.9
 
 link.modulation.scheme("QPSK 3/4")
 link.coding.no_coding()
 
-link.get_result()
+link.downlink_analysis()
+link.uplink_analysis()
 
