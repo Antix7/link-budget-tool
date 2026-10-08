@@ -56,6 +56,7 @@ def to_dB(quantity):
     return quantity.to(u.dB(quantity.si.unit))
 
 
+
 class Spacecraft:
     def __init__(self, frequency):
         self.frequency = frequency
