@@ -41,12 +41,12 @@ modulation_schemes = { # name: [required SNR, spectral efficiency] - BER=1e-9
 
 
 def available_codes():
-    print(coding_schemes.keys())
-    return coding_schemes.keys()
+    print(list(coding_schemes.keys()))
+    return list(coding_schemes.keys())
 
 def available_modulations():
-    print(modulation_schemes.keys())
-    return modulation_schemes.keys()
+    print(list(modulation_schemes.keys()))
+    return list(modulation_schemes.keys())
 
 def to_dB(quantity):
     if type(quantity) in (float, int): # check if it is dimensionless
@@ -59,6 +59,14 @@ def parabolic_antenna(frequency, diameter, efficiency):
     gain = 2 * to_dB(pi * diameter * frequency / c) + to_dB(efficiency)
     half_power_angle = (u.GHz * u.m * u.deg * 21 / (frequency * diameter)).to(u.deg)  # empirical formula
     return gain, half_power_angle
+
+def format_bandwidth(bandwidth):
+        bandwidth = bandwidth.to(u.kHz)
+        if bandwidth.value > 1000:
+            bandwidth = bandwidth.to(u.MHz)
+            if bandwidth.value > 1000:
+                bandwidth = bandwidth.to(u.GHz)
+        return bandwidth
 
 
 class Spacecraft:
@@ -192,46 +200,15 @@ class LinkAnalysis:
 
     def downlink_analysis(self):
         margin = self.get_margin(self.downlink_SNR())
-        bandwidth = self.get_bandwidth(self.downlink_data_rate)
+        bandwidth = format_bandwidth(self.get_bandwidth(self.downlink_data_rate))
         print("Downlink analysis results:")
         print(f"Link margin: {margin:.3f}")
         print(f"Required bandwidth: {bandwidth:.2f}")
 
     def uplink_analysis(self):
         margin = self.get_margin(self.uplink_SNR())
-        bandwidth = self.get_bandwidth(self.uplink_data_rate)
+        bandwidth = format_bandwidth(self.get_bandwidth(self.uplink_data_rate))
         print("Uplink analysis results:")
         print(f"Link margin: {margin:.3f}")
         print(f"Required bandwidth: {bandwidth:.2f}")
-
-
-
-
-link = LinkAnalysis(
-    downlink_frequency=2.5 * u.GHz,
-    uplink_frequency=2 * u.GHz,
-    downlink_data_rate = 250*u.MHz,
-    uplink_data_rate = 250*u.MHz,
-    minimum_elevation_angle= 10*u.deg
-)
-
-link.spacecraft.parabolic_antenna(0.166*u.m, 0.55)
-link.spacecraft.transmitter_power = 2 * u.W
-link.spacecraft.antenna_loss = 0.97 * u.dB
-link.spacecraft.pointing_loss(0.25*u.deg)
-link.spacecraft.G_over_T = -10 * u.dB(1/u.Kelvin)
-
-link.ground_station.G_over_T = 16.2*u.dB(1/u.Kelvin)
-link.ground_station.latitude = 52.07*u.deg
-link.ground_station.longitude = 4.30*u.deg
-link.ground_station.EIRP = 50*u.dB(u.W)
-
-link.space_loss.Earth_orbit(570*u.km)
-link.rain_availability_percent = 99.9
-
-link.modulation.scheme("QPSK 3/4")
-link.coding.no_coding()
-
-link.downlink_analysis()
-link.uplink_analysis()
 
