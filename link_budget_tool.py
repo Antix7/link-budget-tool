@@ -186,37 +186,11 @@ class LinkAnalysis:
                + self.ground_station.G_over_T + self.coding.gain - to_dB(k_B * self.downlink_data_rate / self.coding.rate))
         return SNR
 
-    def downlink_dB_breakdown(self):
-        print("Downlink dB breakdown")
-        print(f"Spacecraft EIRP: {self.spacecraft.get_EIRP():.2f}")
-        print(f"Free-space loss: {self.space_loss.get_loss(self.downlink_frequency):.2f}")
-        print(f"Atmospheric loss: {self.atmospheric_attenuation(self.downlink_frequency):.2f}")
-        print(f"Rain loss: {self.rain_attenuation(self.downlink_frequency):.2f}")
-        print(f"Ground station G/T: {self.ground_station.G_over_T:.2f}")
-        print(f"Coding gain: {self.coding.gain:.2f}")
-        print(f"Required data rate: {to_dB(self.downlink_data_rate / self.coding.rate):.2f}")
-        print(f"Boltzmann constant: {to_dB(k_B):.2f}")
-        print(f"Required SNR: {self.modulation.required_SNR:.2f}")
-        print()
-
     def uplink_SNR(self):
         SNR = (self.ground_station.EIRP - self.space_loss.get_loss(self.uplink_frequency)
                - self.atmospheric_attenuation(self.uplink_frequency) - self.rain_attenuation(self.uplink_frequency)
                + self.spacecraft.G_over_T + self.coding.gain - to_dB(k_B * self.uplink_data_rate / self.coding.rate))
         return SNR
-
-    def uplink_dB_breakdown(self):
-        print("Uplink dB breakdown")
-        print(f"Ground station EIRP: {self.ground_station.EIRP:.2f}")
-        print(f"Free-space loss: {self.space_loss.get_loss(self.uplink_frequency):.2f}")
-        print(f"Atmospheric loss: {self.atmospheric_attenuation(self.uplink_frequency):.2f}")
-        print(f"Rain loss: {self.rain_attenuation(self.uplink_frequency):.2f}")
-        print(f"Ground station G/T: {self.spacecraft.G_over_T:.2f}")
-        print(f"Coding gain: {self.coding.gain:.2f}")
-        print(f"Required data rate: {to_dB(self.uplink_data_rate / self.coding.rate):.2f}")
-        print(f"Boltzmann constant: {to_dB(k_B):.2f}")
-        print(f"Required SNR: {self.modulation.required_SNR:.2f}")
-        print()
 
     def get_margin(self, SNR):
         return SNR - self.modulation.required_SNR
@@ -225,16 +199,41 @@ class LinkAnalysis:
         return data_rate / (self.coding.rate * self.modulation.spectral_efficiency)
 
     def downlink_analysis(self):
-        margin = self.get_margin(self.downlink_SNR())
+        SNR = self.downlink_SNR()
+        margin = self.get_margin(SNR)
         bandwidth = format_bandwidth(self.get_bandwidth(self.downlink_data_rate))
-        print("Downlink analysis results:")
+        print("Downlink analysis summary:")
         print(f"Link margin: {margin:.3f}")
         print(f"Required bandwidth: {bandwidth:.2f}")
+        print("Downlink dB breakdown:")
+        print(f"Spacecraft EIRP: {self.spacecraft.get_EIRP():.2f}")
+        print(f"Free-space loss: {self.space_loss.get_loss(self.downlink_frequency):.2f}")
+        print(f"Atmospheric loss: {self.atmospheric_attenuation(self.downlink_frequency):.2f}")
+        print(f"Rain loss: {self.rain_attenuation(self.downlink_frequency):.2f}")
+        print(f"Ground station G/T: {self.ground_station.G_over_T:.2f}")
+        print(f"Coding gain: {self.coding.gain:.2f}")
+        print(f"Required data rate: {to_dB(self.downlink_data_rate / self.coding.rate):.2f}")
+        print(f"Boltzmann constant: {to_dB(k_B):.2f}")
+        print(f"Received SNR: {SNR:.2f}")
+        print(f"Required SNR: {self.modulation.required_SNR:.2f}")
+        print("-"*40)
 
     def uplink_analysis(self):
-        margin = self.get_margin(self.uplink_SNR())
+        SNR = self.uplink_SNR()
+        margin = self.get_margin(SNR)
         bandwidth = format_bandwidth(self.get_bandwidth(self.uplink_data_rate))
-        print("Uplink analysis results:")
+        print("Uplink analysis summary:")
         print(f"Link margin: {margin:.3f}")
         print(f"Required bandwidth: {bandwidth:.2f}")
-
+        print("Uplink dB breakdown:")
+        print(f"Ground station EIRP: {self.ground_station.EIRP:.2f}")
+        print(f"Free-space loss: {self.space_loss.get_loss(self.uplink_frequency):.2f}")
+        print(f"Atmospheric loss: {self.atmospheric_attenuation(self.uplink_frequency):.2f}")
+        print(f"Rain loss: {self.rain_attenuation(self.uplink_frequency):.2f}")
+        print(f"Spacecraft G/T: {self.spacecraft.G_over_T:.2f}")
+        print(f"Coding gain: {self.coding.gain:.2f}")
+        print(f"Required data rate: {to_dB(self.uplink_data_rate / self.coding.rate):.2f}")
+        print(f"Boltzmann constant: {to_dB(k_B):.2f}")
+        print(f"Received SNR: {SNR:.2f}")
+        print(f"Required SNR: {self.modulation.required_SNR:.2f}")
+        print("-"*40)

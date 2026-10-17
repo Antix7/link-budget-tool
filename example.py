@@ -34,7 +34,4 @@ link.coding.no_coding()
 
 
 link.downlink_analysis()
-link.downlink_dB_breakdown()
-
 link.uplink_analysis()
-link.uplink_dB_breakdown()
